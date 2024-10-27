@@ -43,8 +43,6 @@ export default function Tree() {
     fetchTree()
   }, [])
 
-  console.log(data)
-
   return (
     <div className="p-4">
       <div className="absolute inset-0 top-14">

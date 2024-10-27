@@ -1,3 +1,4 @@
+import Crdt from "./crdt"
 import Fallback from "./fallback"
 import Seed from "./seed"
 import Sql from "./sql"
@@ -21,6 +22,12 @@ export const routes = [
     emoji: "🌲",
     path: "/tree",
     element: <Tree />,
+  },
+  {
+    title: "CRDT",
+    emoji: "🔄",
+    path: "/crdt",
+    element: <Crdt />,
   },
   {
     title: "",

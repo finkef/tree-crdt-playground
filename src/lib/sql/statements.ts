@@ -1,6 +1,24 @@
+import { Move } from "./types"
+
 export type Statement = {
   sql: string
   bindings?: any[]
+}
+
+export type DatabaseOptions = {
+  tables: {
+    nodes: string
+    payloads: string
+    opLog: string
+  }
+}
+
+export const defaultDatabaseOptions: DatabaseOptions = {
+  tables: {
+    nodes: "nodes",
+    payloads: "payloads",
+    opLog: "op_log",
+  },
 }
 
 /**
@@ -42,47 +60,135 @@ const sql = (
   }
 }
 
-export const createTables = () => {
+export const createTables = (
+  options: DatabaseOptions = defaultDatabaseOptions
+) => {
   return sql`
-    CREATE TABLE IF NOT EXISTS nodes (
+    -- Create tables
+    CREATE TABLE IF NOT EXISTS ${options.tables.nodes} (
         id TEXT PRIMARY KEY,
         parent_id TEXT,
-        FOREIGN KEY (parent_id) REFERENCES nodes(id)
+        FOREIGN KEY (parent_id) REFERENCES ${options.tables.nodes}(id)
     );
-
-    CREATE TABLE IF NOT EXISTS payloads (
+    CREATE TABLE IF NOT EXISTS ${options.tables.payloads} (
         node_id TEXT NOT NULL,
         content TEXT,
         timestamp INTEGER NOT NULL,
-        FOREIGN KEY (node_id) REFERENCES nodes(id)
+        FOREIGN KEY (node_id) REFERENCES ${options.tables.nodes}(id)
     );
-
-    CREATE TABLE IF NOT EXISTS op_log (
+    CREATE TABLE IF NOT EXISTS ${options.tables.opLog} (
         seq INTEGER PRIMARY KEY AUTOINCREMENT,
         timestamp INTEGER NOT NULL,
         node_id TEXT NOT NULL,
         old_parent_id TEXT,
         new_parent_id TEXT,
-        FOREIGN KEY (node_id) REFERENCES nodes(id),
-        FOREIGN KEY (old_parent_id) REFERENCES nodes(id),
-        FOREIGN KEY (new_parent_id) REFERENCES nodes(id)
+        FOREIGN KEY (node_id) REFERENCES ${options.tables.nodes}(id),
+        FOREIGN KEY (old_parent_id) REFERENCES ${options.tables.nodes}(id),
+        FOREIGN KEY (new_parent_id) REFERENCES ${options.tables.nodes}(id)
     );
 
-    CREATE INDEX IF NOT EXISTS idx_nodes_parent_id ON nodes(parent_id);
-    CREATE INDEX IF NOT EXISTS idx_op_log_timestamp ON op_log(timestamp);
-    CREATE INDEX IF NOT EXISTS idx_payloads_node_id ON payloads(node_id);
+    -- Create indexes
+    CREATE INDEX IF NOT EXISTS idx_${options.tables.nodes}_parent_id ON ${options.tables.nodes}(parent_id);
+    CREATE INDEX IF NOT EXISTS idx_${options.tables.opLog}_timestamp ON ${options.tables.opLog}(timestamp);
+    CREATE INDEX IF NOT EXISTS idx_${options.tables.payloads}_node_id ON ${options.tables.payloads}(node_id);
+
+    -- Create the root and tombstone nodes
+    INSERT OR IGNORE INTO ${options.tables.nodes} (id, parent_id) VALUES ('ROOT', NULL);
+    INSERT OR IGNORE INTO ${options.tables.nodes} (id, parent_id) VALUES ('TOMBSTONE', NULL);
+
+    -- Create temporary tables for the operations
+    CREATE TABLE IF NOT EXISTS temp_undone_state_${options.tables.opLog} (
+        id TEXT PRIMARY KEY,
+        parent_id TEXT
+    );
+    CREATE TABLE IF NOT EXISTS temp_final_state_${options.tables.opLog} (
+        id TEXT PRIMARY KEY,
+        new_parent_id TEXT
+    );
+
+    -- Drop the trigger if it exists
+    DROP TRIGGER IF EXISTS crdt_insert_${options.tables.opLog};
+
+    -- Create the trigger
+    CREATE TRIGGER IF NOT EXISTS crdt_insert_${options.tables.opLog}
+    AFTER INSERT ON ${options.tables.opLog}
+    BEGIN
+        -- Step 0: Ensure the node exists
+        INSERT OR IGNORE INTO ${options.tables.nodes} (id, parent_id)
+        VALUES (NEW.node_id, NULL);
+        
+        -- Clear temporary tables
+        DELETE FROM temp_undone_state_${options.tables.opLog};
+        DELETE FROM temp_final_state_${options.tables.opLog};
+        
+        -- Step 1: Insert into temp_undone_state
+        INSERT INTO temp_undone_state_${options.tables.opLog}
+        SELECT n.id,
+               COALESCE(
+                   (SELECT old_parent_id
+                    FROM ${options.tables.opLog}
+                    WHERE node_id = n.id
+                      AND timestamp >= NEW.timestamp
+                    ORDER BY timestamp DESC, seq DESC
+                    LIMIT 1),
+                   n.parent_id
+               ) AS parent_id
+        FROM ${options.tables.nodes} n;
+        
+        -- Step 2: Insert into temp_final_state
+        INSERT INTO temp_final_state_${options.tables.opLog}
+        SELECT t.id,
+               COALESCE(
+                   (SELECT new_parent_id
+                    FROM ${options.tables.opLog}
+                    WHERE node_id = t.id
+                      AND timestamp >= NEW.timestamp
+                    ORDER BY timestamp ASC, seq ASC
+                    LIMIT 1),
+                   t.parent_id
+               ) AS new_parent_id
+        FROM temp_undone_state_${options.tables.opLog} t;
+        
+        -- Step 3: Update nodes table
+        UPDATE ${options.tables.nodes}
+        SET parent_id = (
+            SELECT new_parent_id
+            FROM temp_final_state_${options.tables.opLog}
+            WHERE temp_final_state_${options.tables.opLog}.id = ${options.tables.nodes}.id
+        )
+        WHERE id IN (
+            SELECT id 
+            FROM temp_final_state_${options.tables.opLog}
+            WHERE temp_final_state_${options.tables.opLog}.new_parent_id IS NOT ${options.tables.nodes}.parent_id
+        );
+    END;
   `
 }
 
-export const nodeCount = () => {
-  return sql`SELECT COUNT(1) FROM nodes`
+export const clearTables = (
+  options: DatabaseOptions = defaultDatabaseOptions
+) => {
+  return sql`
+    DELETE FROM ${options.tables.nodes} WHERE id != 'ROOT' AND id != 'TOMBSTONE';
+    DELETE FROM ${options.tables.payloads};
+    DELETE FROM ${options.tables.opLog};
+  `
 }
 
-export const seed = (count: number) => {
+export const nodeCount = (
+  options: DatabaseOptions = defaultDatabaseOptions
+) => {
+  return sql`SELECT COUNT(1) FROM ${options.tables.nodes}`
+}
+
+export const seed = (
+  count: number,
+  options: DatabaseOptions = defaultDatabaseOptions
+) => {
   return sql`
     BEGIN;
 
-    DELETE FROM nodes;
+    DELETE FROM ${options.tables.nodes};
 
     -- Create a temporary table to hold nodes before inserting into the main table
     CREATE TEMP TABLE temp_nodes (
@@ -107,7 +213,7 @@ export const seed = (count: number) => {
     FROM cnt;
 
     -- Insert the generated nodes into the main 'nodes' table
-    INSERT INTO nodes (id, parent_id)
+    INSERT INTO ${options.tables.nodes} (id, parent_id)
     SELECT id, parent_id FROM temp_nodes;
 
     -- Clean up the temporary table
@@ -117,10 +223,25 @@ export const seed = (count: number) => {
   `
 }
 
-export const tree = () => {
+export const tree = (options: DatabaseOptions = defaultDatabaseOptions) => {
   return sql`
     SELECT nodes.id, nodes.parent_id, payloads.content
-    FROM nodes
-    LEFT JOIN payloads ON nodes.id = payloads.node_id
+    FROM ${options.tables.nodes} AS nodes
+    LEFT JOIN ${options.tables.payloads} AS payloads ON nodes.id = payloads.node_id
   `
+}
+
+export const insertMoves = (
+  moves: Move[],
+  options: DatabaseOptions = defaultDatabaseOptions
+) => {
+  return sql(
+    `INSERT INTO ${options.tables.opLog} (timestamp, node_id, old_parent_id, new_parent_id) VALUES (?, ?, ?, ?)`,
+    moves.map((move) => [
+      move.timestamp,
+      move.node_id,
+      move.old_parent_id,
+      move.new_parent_id,
+    ])
+  )
 }
