@@ -1,6 +1,5 @@
 import { OpLog } from "@/components/op-log"
 import { TreeVisualization } from "@/components/tree-visualization"
-import { Move } from "@/lib/sql/types"
 import { useOpLog } from "@/lib/sql/use-op-log"
 import { useSql } from "@/lib/sql/use-sql"
 import { useTree } from "@/lib/sql/use-tree"
