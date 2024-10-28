@@ -73,10 +73,43 @@ export const useSql = (options?: statements.DatabaseOptions) => {
         }
       },
       /**
+       * Returns the entire operation log of the database.
+       */
+      opLog: async () => {
+        const result = await worker.exec(statements.opLog(options))
+        return {
+          moves: withColumns(result.results[0].rows, [
+            "timestamp",
+            "node_id",
+            "old_parent_id",
+            "new_parent_id",
+            "source",
+            "synced_at", // Added synced_at to columns
+          ]) as Move[],
+          elapsed: result.elapsed,
+        }
+      },
+      /**
        * Inserts a list of moves into the database.
        */
       insertMoves: async (moves: Move[]) => {
         const result = await worker.exec(statements.insertMoves(moves, options))
+        Notifier.notify(options)
+
+        return {
+          elapsed: result.elapsed,
+        }
+      },
+      /**
+       * Sets the synced_at timestamp for multiple moves
+       */
+      markMovesSynced: async (
+        moves: { node_id: string; timestamp: number }[],
+        syncedAt: number
+      ) => {
+        const result = await worker.exec(
+          statements.markMovesSynced(moves, syncedAt, options)
+        )
         Notifier.notify(options)
 
         return {

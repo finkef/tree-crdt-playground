@@ -82,6 +82,8 @@ export const createTables = (
         node_id TEXT NOT NULL,
         old_parent_id TEXT,
         new_parent_id TEXT,
+        source TEXT,
+        synced_at INTEGER,
         FOREIGN KEY (node_id) REFERENCES ${options.tables.nodes}(id),
         FOREIGN KEY (old_parent_id) REFERENCES ${options.tables.nodes}(id),
         FOREIGN KEY (new_parent_id) REFERENCES ${options.tables.nodes}(id)
@@ -231,17 +233,36 @@ export const tree = (options: DatabaseOptions = defaultDatabaseOptions) => {
   `
 }
 
+export const opLog = (options: DatabaseOptions = defaultDatabaseOptions) => {
+  return sql`SELECT timestamp, node_id, old_parent_id, new_parent_id, source, synced_at FROM ${options.tables.opLog} ORDER BY timestamp DESC, seq DESC`
+}
+
 export const insertMoves = (
   moves: Move[],
   options: DatabaseOptions = defaultDatabaseOptions
 ) => {
   return sql(
-    `INSERT INTO ${options.tables.opLog} (timestamp, node_id, old_parent_id, new_parent_id) VALUES (?, ?, ?, ?)`,
+    `INSERT INTO ${options.tables.opLog} (timestamp, node_id, old_parent_id, new_parent_id, source, synced_at) VALUES (?, ?, ?, ?, ?, ?)`,
     moves.map((move) => [
       move.timestamp,
       move.node_id,
       move.old_parent_id,
       move.new_parent_id,
+      move.source || null,
+      move.synced_at || null,
     ])
+  )
+}
+
+export const markMovesSynced = (
+  moveIds: { node_id: string; timestamp: number }[],
+  syncedAt: number,
+  options: DatabaseOptions = defaultDatabaseOptions
+) => {
+  return sql(
+    `UPDATE ${options.tables.opLog} 
+     SET synced_at = ? 
+     WHERE (node_id, timestamp) IN (${moveIds.map(() => "(?, ?)").join(",")})`,
+    [syncedAt, ...moveIds.flatMap((move) => [move.node_id, move.timestamp])]
   )
 }

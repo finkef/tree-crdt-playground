@@ -1,4 +1,7 @@
+import { OpLog } from "@/components/op-log"
 import { TreeVisualization } from "@/components/tree-visualization"
+import { Move } from "@/lib/sql/types"
+import { useOpLog } from "@/lib/sql/use-op-log"
 import { useSql } from "@/lib/sql/use-sql"
 import { useTree } from "@/lib/sql/use-tree"
 import { useEffect, useState } from "react"
@@ -23,8 +26,14 @@ export default function Crdt() {
   const right = useSql(RIGHT_DB_OPTIONS)
   const [initialized, setInitialized] = useState(false)
 
+  const [leftConnected, setLeftConnected] = useState(true)
+  const [rightConnected, setRightConnected] = useState(true)
+
   const leftTree = useTree(LEFT_DB_OPTIONS)
   const rightTree = useTree(RIGHT_DB_OPTIONS)
+
+  const leftOpLog = useOpLog(LEFT_DB_OPTIONS)
+  const rightOpLog = useOpLog(RIGHT_DB_OPTIONS)
 
   useEffect(() => {
     const init = async () => {
@@ -52,16 +61,79 @@ export default function Crdt() {
 
   return (
     <div className="p-4 grid grid-cols-2 gap-4">
-      <TreeVisualization
-        nodes={leftTree.nodes}
-        onMove={(move) => left.insertMoves([move])}
-        queryTime={leftTree.elapsed}
-      />
-      <TreeVisualization
-        nodes={rightTree.nodes}
-        onMove={(move) => right.insertMoves([move])}
-        queryTime={rightTree.elapsed}
-      />
+      <div className="flex flex-col gap-4">
+        <TreeVisualization
+          connected={leftConnected}
+          onConnectedChange={async (connected) => {
+            setLeftConnected(connected)
+
+            if (!connected) return
+
+            const pendingMoves = leftOpLog.moves.filter(
+              (move) => move.source === "left" && !move.synced_at
+            )
+
+            const now = Date.now()
+            await right.insertMoves(
+              pendingMoves.map((move) => ({ ...move, synced_at: now }))
+            )
+            await left.markMovesSynced(pendingMoves, now)
+          }}
+          nodes={leftTree.nodes}
+          onMove={async (move) => {
+            const augmentedMove = {
+              ...move,
+              source: "left",
+              synced_at: leftConnected ? Date.now() : undefined,
+            }
+
+            await left.insertMoves([augmentedMove])
+
+            if (leftConnected) {
+              await right.insertMoves([augmentedMove])
+            }
+          }}
+          queryTime={leftTree.elapsed}
+        />
+        <OpLog moves={leftOpLog.moves} />
+      </div>
+
+      <div className="flex flex-col gap-4">
+        <TreeVisualization
+          connected={rightConnected}
+          onConnectedChange={async (connected) => {
+            setRightConnected(connected)
+
+            if (!connected) return
+
+            const pendingMoves = rightOpLog.moves.filter(
+              (move) => move.source === "right" && !move.synced_at
+            )
+
+            const now = Date.now()
+            await left.insertMoves(
+              pendingMoves.map((move) => ({ ...move, synced_at: now }))
+            )
+            await right.markMovesSynced(pendingMoves, now)
+          }}
+          nodes={rightTree.nodes}
+          onMove={async (move) => {
+            const augmentedMove = {
+              ...move,
+              source: "right",
+              synced_at: rightConnected ? Date.now() : undefined,
+            }
+
+            await right.insertMoves([augmentedMove])
+
+            if (rightConnected) {
+              await left.insertMoves([augmentedMove])
+            }
+          }}
+          queryTime={rightTree.elapsed}
+        />
+        <OpLog moves={rightOpLog.moves} />
+      </div>
     </div>
   )
 }

@@ -12,17 +12,22 @@ import {
   Remove,
 } from "reaflow"
 import { Button } from "./ui/button"
+import { Switch } from "./ui/switch"
 
 export function TreeVisualization({
   className,
   nodes,
   onMove,
   queryTime,
+  connected,
+  onConnectedChange,
 }: {
   className?: string
   nodes: Node[]
   onMove?: (move: Move) => void
   queryTime?: number
+  connected?: boolean
+  onConnectedChange?: (connected: boolean) => void
 }) {
   const [selections, setSelections] = useState<string[]>([])
 
@@ -50,9 +55,11 @@ export function TreeVisualization({
 
     const nodeData: NodeData[] = nodes.map((node) => ({
       id: node.id,
-      parent_id: node.parent_id,
       text: node.id,
       isTombstone: isTombstone(node),
+      data: {
+        parent_id: node.parent_id,
+      },
     }))
 
     return {
@@ -63,6 +70,23 @@ export function TreeVisualization({
 
   return (
     <div className={cn("border border-border rounded-lg shadow-sm", className)}>
+      {typeof connected === "boolean" ? (
+        <div className="p-4 border-b border-border flex items-center justify-between bg-gray-50/50 bg-[repeating-linear-gradient(45deg,transparent,transparent_4px,rgba(148,163,184,0.1)_2px,rgba(148,163,184,0.1)_8px)]">
+          <span className="text-sm text-muted-foreground">
+            {connected ? (
+              <span className="text-green-500">●</span>
+            ) : (
+              <span className="text-red-500">●</span>
+            )}
+            <span className="ml-2 font-mono">
+              {connected ? "Connected" : "Disconnected"}
+            </span>
+          </span>
+
+          <Switch checked={connected} onCheckedChange={onConnectedChange} />
+        </div>
+      ) : null}
+
       <div className="aspect-square">
         <Canvas
           {...data}

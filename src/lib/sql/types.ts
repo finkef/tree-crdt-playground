@@ -9,4 +9,6 @@ export type Move = {
   node_id: string
   old_parent_id: string | null
   new_parent_id: string
+  source?: string
+  synced_at?: number
 }
