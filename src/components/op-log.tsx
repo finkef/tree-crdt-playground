@@ -44,10 +44,10 @@ export function OpLog({
             <div className="flex-1" />
             <span className="text-muted-foreground">
               {/* Assuming moves less than 5 seconds old are pending */}
-              {move.syncedAt ? (
-                <span className="text-yellow-500">●</span>
-              ) : (
+              {move.synced_at ? (
                 <span className="text-green-500">✓</span>
+              ) : (
+                <span className="text-yellow-500">●</span>
               )}
             </span>
           </div>
