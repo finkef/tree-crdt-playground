@@ -62,6 +62,7 @@ export default function Crdt() {
     <div className="p-4 grid grid-cols-2 gap-4">
       <div className="flex flex-col gap-4">
         <TreeVisualization
+          source="left"
           connected={leftConnected}
           onConnectedChange={async (connected) => {
             setLeftConnected(connected)
@@ -99,6 +100,7 @@ export default function Crdt() {
 
       <div className="flex flex-col gap-4">
         <TreeVisualization
+          source="right"
           connected={rightConnected}
           onConnectedChange={async (connected) => {
             setRightConnected(connected)

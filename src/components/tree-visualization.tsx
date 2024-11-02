@@ -21,6 +21,7 @@ export function TreeVisualization({
   queryTime,
   connected,
   onConnectedChange,
+  source,
 }: {
   className?: string
   nodes: Node[]
@@ -28,6 +29,7 @@ export function TreeVisualization({
   queryTime?: number
   connected?: boolean
   onConnectedChange?: (connected: boolean) => void
+  source?: "left" | "right"
 }) {
   const [selections, setSelections] = useState<string[]>([])
 
@@ -71,7 +73,16 @@ export function TreeVisualization({
   return (
     <div className={cn("border border-border rounded-lg shadow-sm", className)}>
       {typeof connected === "boolean" ? (
-        <div className="p-4 border-b border-border flex items-center justify-between bg-gray-50/50 bg-[repeating-linear-gradient(45deg,transparent,transparent_4px,rgba(148,163,184,0.1)_2px,rgba(148,163,184,0.1)_8px)]">
+        <div
+          className={cn(
+            "p-4 border-b border-border flex items-center justify-between",
+            "bg-gray-50/50 bg-[repeating-linear-gradient(45deg,transparent,transparent_4px,rgba(148,163,184,0.1)_2px,rgba(148,163,184,0.1)_8px)]",
+            source === "left" &&
+              "bg-blue-50/50 bg-[repeating-linear-gradient(45deg,transparent,transparent_4px,rgba(59,130,246,0.05)_2px,rgba(59,130,246,0.05)_8px)]",
+            source === "right" &&
+              "bg-red-50/50 bg-[repeating-linear-gradient(45deg,transparent,transparent_4px,rgba(239,68,68,0.05)_2px,rgba(239,68,68,0.05)_8px)]"
+          )}
+        >
           <span className="text-sm text-muted-foreground">
             {connected ? (
               <span className="text-green-500">●</span>
