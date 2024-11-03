@@ -1,5 +1,3 @@
-import { Move } from "./types"
-
 export type Statement = {
   sql: string
   bindings?: any[]
@@ -43,7 +41,7 @@ export const defaultDatabaseOptions: DatabaseOptions = {
  *   ]);
  * ```
  */
-const sql = (
+export const sql = (
   sql: TemplateStringsArray | string,
   ...values: any[]
 ): Statement => {
@@ -64,6 +62,9 @@ export const createTables = (
   options: DatabaseOptions = defaultDatabaseOptions
 ) => {
   return sql`
+    PRAGMA journal_mode = WAL;
+    PRAGMA synchronous = NORMAL;
+
     -- Create tables
     CREATE TABLE IF NOT EXISTS ${options.tables.nodes} (
         id TEXT PRIMARY KEY,
@@ -84,12 +85,14 @@ export const createTables = (
         new_parent_id TEXT,
         source TEXT,
         synced_at INTEGER,
+        creates_cycle BOOLEAN,
         FOREIGN KEY (node_id) REFERENCES ${options.tables.nodes}(id),
         FOREIGN KEY (old_parent_id) REFERENCES ${options.tables.nodes}(id),
         FOREIGN KEY (new_parent_id) REFERENCES ${options.tables.nodes}(id)
     );
 
     -- Create indexes
+    CREATE INDEX IF NOT EXISTS idx_${options.tables.nodes}_id ON ${options.tables.nodes}(id);
     CREATE INDEX IF NOT EXISTS idx_${options.tables.nodes}_parent_id ON ${options.tables.nodes}(parent_id);
     CREATE INDEX IF NOT EXISTS idx_${options.tables.opLog}_timestamp ON ${options.tables.opLog}(timestamp);
     CREATE INDEX IF NOT EXISTS idx_${options.tables.payloads}_node_id ON ${options.tables.payloads}(node_id);
@@ -167,124 +170,7 @@ export const tree = (options: DatabaseOptions = defaultDatabaseOptions) => {
 }
 
 export const opLog = (options: DatabaseOptions = defaultDatabaseOptions) => {
-  return sql`SELECT timestamp, node_id, old_parent_id, new_parent_id, source, synced_at FROM ${options.tables.opLog} ORDER BY timestamp DESC, seq DESC`
-}
-
-export const insertMoves = (
-  moves: Move[],
-  options: DatabaseOptions = defaultDatabaseOptions
-) => {
-  if (moves.length === 0) return sql`SELECT 1`
-
-  const minTimestamp = Math.min(...moves.map((m) => m.timestamp))
-
-  return sql`
-    BEGIN TRANSACTION;
-
-    -- Clean up any existing temporary tables
-    DROP TABLE IF EXISTS temp_nodes;
-    DROP TABLE IF EXISTS temp_undone_state;
-    DROP TABLE IF EXISTS temp_final_state;
-
-    -- Step 1: Create temp_undone_state
-    CREATE TEMP TABLE temp_undone_state AS
-    WITH ops_to_undo AS (
-        SELECT seq, node_id, old_parent_id, new_parent_id, timestamp
-        FROM ${options.tables.opLog}
-        WHERE timestamp >= ${minTimestamp}
-        ORDER BY timestamp DESC
-    )
-    SELECT id,
-           COALESCE(
-               (SELECT old_parent_id
-                FROM ops_to_undo o
-                WHERE o.node_id = ${options.tables.nodes}.id
-                ORDER BY o.timestamp ASC
-                LIMIT 1),
-               parent_id
-           ) AS parent_id
-    FROM ${options.tables.nodes};
-
-    -- Step 2: Insert the new operations
-    INSERT INTO ${options.tables.opLog} 
-      (timestamp, node_id, old_parent_id, new_parent_id, source, synced_at)
-    VALUES 
-      ${moves
-        .map(
-          (m) =>
-            `(${m.timestamp}, '${m.node_id}', ${
-              m.old_parent_id ? `'${m.old_parent_id}'` : "NULL"
-            }, '${m.new_parent_id}', ${m.source ? `'${m.source}'` : "NULL"}, ${
-              m.synced_at || "NULL"
-            })`
-        )
-        .join(",")};
-
-    -- Step 3: Create temp_final_state
-    CREATE TEMP TABLE temp_final_state AS
-    WITH RECURSIVE 
-    ops_to_redo AS (
-        SELECT seq, node_id, old_parent_id, new_parent_id, timestamp
-        FROM ${options.tables.opLog}
-        WHERE timestamp >= ${minTimestamp}
-        ORDER BY timestamp ASC
-    ),
-    ancestors(child_id, ancestor_id) AS (
-        -- Direct parent-child relationships from undone state
-        SELECT id, parent_id 
-        FROM temp_undone_state
-        WHERE parent_id IS NOT NULL
-        UNION ALL
-        -- Recursive ancestor relationships
-        SELECT a.child_id, t.parent_id
-        FROM ancestors a
-        JOIN temp_undone_state t ON t.id = a.ancestor_id
-        WHERE t.parent_id IS NOT NULL
-    )
-    SELECT id,
-           COALESCE(
-               (
-                   SELECT new_parent_id
-                   FROM ops_to_redo o
-                   WHERE o.node_id = temp_undone_state.id
-                   -- Skip this move if it would create a cycle
-                   AND NOT EXISTS (
-                       SELECT 1 FROM ancestors 
-                       WHERE child_id = o.new_parent_id 
-                       AND ancestor_id = o.node_id
-                   )
-                   ORDER BY o.timestamp DESC
-                   LIMIT 1
-               ),
-               parent_id
-           ) AS new_parent_id
-    FROM temp_undone_state;
-
-    -- Step 4: Ensure all moved nodes exist
-    INSERT OR IGNORE INTO ${options.tables.nodes} (id, parent_id)
-    SELECT DISTINCT node_id, new_parent_id 
-    FROM ${options.tables.opLog}
-    WHERE timestamp >= ${minTimestamp};
-
-    -- Step 5: Update nodes table (no need to check for cycles again)
-    UPDATE ${options.tables.nodes}
-    SET parent_id = (
-        SELECT new_parent_id
-        FROM temp_final_state
-        WHERE temp_final_state.id = ${options.tables.nodes}.id
-    )
-    WHERE id IN (
-        SELECT t.id 
-        FROM temp_final_state t
-        WHERE t.new_parent_id != ${options.tables.nodes}.parent_id
-    );
-
-    -- Clean up
-    DROP TABLE temp_undone_state;
-    DROP TABLE temp_final_state;
-
-    COMMIT;
-  `
+  return sql`SELECT timestamp, node_id, old_parent_id, new_parent_id, source, synced_at, creates_cycle FROM ${options.tables.opLog} ORDER BY timestamp DESC, seq DESC`
 }
 
 export const markMovesSynced = (

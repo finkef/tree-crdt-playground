@@ -1,5 +1,6 @@
 import { nanoid } from "nanoid"
-import { type Statement } from "./statements"
+import { DatabaseOptions, type Statement } from "./statements"
+import { Move } from "./types"
 
 export const reset = () => ({
   type: "reset" as const,
@@ -13,4 +14,14 @@ export const exec = ({ sql, bindings }: Statement) => ({
   bindings,
 })
 
-export type Action = ReturnType<typeof reset> | ReturnType<typeof exec>
+export const insertMoves = (moves: Move[], options: DatabaseOptions) => ({
+  type: "insertMoves" as const,
+  id: nanoid(),
+  moves,
+  options,
+})
+
+export type Action =
+  | ReturnType<typeof reset>
+  | ReturnType<typeof exec>
+  | ReturnType<typeof insertMoves>

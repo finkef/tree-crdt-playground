@@ -1,7 +1,8 @@
 import SQLWorker from "@/lib/sql/worker?worker"
 import { createContext, useContext } from "react"
 import * as actions from "./actions"
-import { type Statement } from "./statements"
+import { DatabaseOptions, type Statement } from "./statements"
+import { Move } from "./types"
 
 const worker = new SQLWorker()
 
@@ -31,6 +32,8 @@ const context = {
     results: Array<{ columns: string[]; rows: any[] }>
   }> => waitForResult(actions.exec(statement)),
   reset: () => waitForResult(actions.reset()),
+  insertMoves: async (moves: Move[], options: DatabaseOptions) =>
+    waitForResult(actions.insertMoves(moves, options)),
 }
 
 port1.addEventListener("message", (event) => {

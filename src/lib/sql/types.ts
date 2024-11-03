@@ -11,4 +11,5 @@ export type Move = {
   new_parent_id: string
   source?: string
   synced_at?: number
+  creates_cycle?: boolean
 }

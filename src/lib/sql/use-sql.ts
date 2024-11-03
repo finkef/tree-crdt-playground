@@ -84,7 +84,8 @@ export const useSql = (options?: statements.DatabaseOptions) => {
             "old_parent_id",
             "new_parent_id",
             "source",
-            "synced_at", // Added synced_at to columns
+            "synced_at",
+            "creates_cycle",
           ]) as Move[],
           elapsed: result.elapsed,
         }
@@ -93,8 +94,13 @@ export const useSql = (options?: statements.DatabaseOptions) => {
        * Inserts a list of moves into the database.
        */
       insertMoves: async (moves: Move[]) => {
-        const result = await worker.exec(statements.insertMoves(moves, options))
+        const result = await worker.insertMoves(
+          moves,
+          options ?? statements.defaultDatabaseOptions
+        )
         Notifier.notify(options)
+
+        console.info(`Inserted ${moves.length} moves in ${result.elapsed}ms.`)
 
         return {
           elapsed: result.elapsed,

@@ -1,6 +1,6 @@
 import { Move } from "@/lib/sql/types"
 import { cn } from "@/lib/utils"
-import { ArrowRight, Plus, Trash2 } from "lucide-react"
+import { ArrowRight, CircleAlert, Plus, Trash2 } from "lucide-react"
 
 export function OpLog({
   moves,
@@ -41,6 +41,11 @@ export function OpLog({
             <span className="text-muted-foreground">
               {move.old_parent_id ?? "NULL"} → {move.new_parent_id ?? "NULL"}
             </span>
+            {move.creates_cycle ? (
+              <div className="ml-2 text-red-500 flex items-center gap-1">
+                <CircleAlert className="w-4 h-4" /> Skipped due to cycle
+              </div>
+            ) : null}
             <div className="flex-1" />
             <span className="text-muted-foreground">
               {/* Assuming moves less than 5 seconds old are pending */}
