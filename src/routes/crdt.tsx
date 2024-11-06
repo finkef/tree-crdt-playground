@@ -70,13 +70,27 @@ export default function Crdt() {
             if (!connected) return
 
             const pendingMoves = leftOpLog.moves.filter(
-              (move) => move.source === "left" && !move.synced_at
+              (move) =>
+                move.source &&
+                ["left", "reconcile"].includes(move.source) &&
+                !move.synced_at
             )
 
             const now = Date.now()
-            await right.insertMoves(
-              pendingMoves.map((move) => ({ ...move, synced_at: now }))
+            const { restoreMoves } = await right.insertMoves(
+              pendingMoves.map((move) => ({ ...move, synced_at: now })),
+              true
             )
+
+            if (rightConnected) {
+              // Add reconciliation moves to the left
+              await left.insertMoves(
+                restoreMoves.map((m) => ({ ...m, synced_at: now })),
+                true
+              )
+              await right.markMovesSynced(restoreMoves, now)
+            }
+
             await left.markMovesSynced(pendingMoves, now)
           }}
           nodes={leftTree.nodes}
@@ -90,7 +104,15 @@ export default function Crdt() {
             await left.insertMoves([augmentedMove])
 
             if (leftConnected) {
-              await right.insertMoves([augmentedMove])
+              const { restoreMoves } = await right.insertMoves(
+                [augmentedMove],
+                true
+              )
+              // Add reconciliation moves to the right
+              await left.insertMoves(
+                restoreMoves.map((m) => ({ ...m, synced_at: Date.now() })),
+                true
+              )
             }
           }}
           queryTime={leftTree.elapsed}
@@ -108,13 +130,26 @@ export default function Crdt() {
             if (!connected) return
 
             const pendingMoves = rightOpLog.moves.filter(
-              (move) => move.source === "right" && !move.synced_at
+              (move) =>
+                move.source &&
+                ["right", "reconcile"].includes(move.source) &&
+                !move.synced_at
             )
 
             const now = Date.now()
-            await left.insertMoves(
-              pendingMoves.map((move) => ({ ...move, synced_at: now }))
+            const { restoreMoves } = await left.insertMoves(
+              pendingMoves.map((move) => ({ ...move, synced_at: now })),
+              true
             )
+
+            if (leftConnected) {
+              // Add reconciliation moves to the right
+              await right.insertMoves(
+                restoreMoves.map((m) => ({ ...m, synced_at: now }))
+              )
+              await left.markMovesSynced(restoreMoves, now)
+            }
+
             await right.markMovesSynced(pendingMoves, now)
           }}
           nodes={rightTree.nodes}
@@ -128,7 +163,16 @@ export default function Crdt() {
             await right.insertMoves([augmentedMove])
 
             if (rightConnected) {
-              await left.insertMoves([augmentedMove])
+              const { restoreMoves } = await left.insertMoves(
+                [augmentedMove],
+                true
+              )
+
+              // Add reconciliation moves to the right
+              await right.insertMoves(
+                restoreMoves.map((m) => ({ ...m, synced_at: Date.now() })),
+                true
+              )
             }
           }}
           queryTime={rightTree.elapsed}

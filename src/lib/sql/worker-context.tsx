@@ -32,8 +32,15 @@ const context = {
     results: Array<{ columns: string[]; rows: any[] }>
   }> => waitForResult(actions.exec(statement)),
   reset: () => waitForResult(actions.reset()),
-  insertMoves: async (moves: Move[], options: DatabaseOptions) =>
-    waitForResult(actions.insertMoves(moves, options)),
+  insertMoves: async (
+    moves: Move[],
+    reconcile: boolean,
+    options: DatabaseOptions
+  ): Promise<{
+    id: string
+    elapsed: number
+    restoreMoves: Move[]
+  }> => waitForResult(actions.insertMoves(moves, reconcile, options)),
 }
 
 port1.addEventListener("message", (event) => {

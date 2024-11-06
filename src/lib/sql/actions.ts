@@ -14,10 +14,15 @@ export const exec = ({ sql, bindings }: Statement) => ({
   bindings,
 })
 
-export const insertMoves = (moves: Move[], options: DatabaseOptions) => ({
+export const insertMoves = (
+  moves: Move[],
+  reconcile: boolean,
+  options: DatabaseOptions
+) => ({
   type: "insertMoves" as const,
   id: nanoid(),
   moves,
+  reconcile,
   options,
 })
 

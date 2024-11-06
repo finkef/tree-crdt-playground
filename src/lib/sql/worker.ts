@@ -8,6 +8,7 @@ import { Action } from "./actions"
 import * as statements from "./statements"
 import { sql } from "./statements"
 import { Mutex } from "./mutex"
+import { Move } from "./types"
 
 const DB_NAME = "tree-test"
 
@@ -127,7 +128,7 @@ async function setup() {
         }
 
         case "insertMoves": {
-          const { moves, options } = action
+          const { moves, reconcile, options } = action
 
           const start = performance.now()
 
@@ -258,6 +259,138 @@ async function setup() {
                 `)
             }
 
+            let restoreMoves: Move[] = []
+
+            if (reconcile) {
+              // Find nodes that need restoration - those that:
+              // 1. Are in tombstone
+              // 2. Have descendants that were moved by a different source
+              // 3. Were deleted without knowledge of those moves (based on synced_at times)
+              const nodesToRestoreResult = await execStatement(sql`
+                WITH RECURSIVE 
+                ordered_moves AS (
+                  SELECT 
+                    node_id,
+                    old_parent_id,
+                    new_parent_id,
+                    source,
+                    synced_at,
+                    timestamp,
+                    ROW_NUMBER() OVER (PARTITION BY node_id ORDER BY timestamp DESC) as rn
+                  FROM ${options.tables.opLog}
+                ),
+                tree AS (
+                  SELECT id, parent_id
+                  FROM temp_nodes
+                  WHERE parent_id != 'TOMBSTONE'
+                ),
+                ancestors AS (
+                  SELECT 
+                    id as descendant_id,
+                    id as ancestor_id,
+                    0 as depth
+                  FROM tree
+                  
+                  UNION ALL
+                  
+                  SELECT 
+                    a.descendant_id,
+                    t.parent_id as ancestor_id,
+                    a.depth + 1
+                  FROM ancestors a
+                  JOIN tree t ON t.id = a.ancestor_id
+                  WHERE t.parent_id IS NOT NULL
+                )
+                SELECT DISTINCT
+                  d.node_id as deleted_node,
+                  d.old_parent_id as original_parent,
+                  d.timestamp as deletion_time,
+                  d.synced_at as deletion_sync,
+                  m.node_id as descendant_node,
+                  m.source as descendant_source,
+                  m.synced_at as descendant_sync,
+                  m.timestamp as descendant_move_time
+                FROM ordered_moves d
+                JOIN ancestors a ON a.ancestor_id = d.node_id
+                JOIN ordered_moves m ON m.node_id = a.descendant_id
+                WHERE d.rn = 1  -- Latest move for deleted node
+                  AND m.rn = 1  -- Latest move for descendant
+                  AND d.new_parent_id = 'TOMBSTONE'
+                  AND m.new_parent_id != 'TOMBSTONE'
+                  AND d.source != m.source
+                  AND (
+                    -- Either the descendant move hasn't been synced (is new)
+                    m.synced_at IS NULL 
+                    -- Or it was synced before or at the same time as the deletion
+                    OR m.synced_at <= COALESCE(d.synced_at, m.synced_at)
+                  );
+              `)
+
+              console.log("Nodes to restore:", {
+                columns: nodesToRestoreResult[0].columns,
+                rows: nodesToRestoreResult[0].rows,
+              })
+
+              // Process nodes that need restoration
+              restoreMoves = nodesToRestoreResult[0].rows.map(
+                ([
+                  deletedNode,
+                  originalParent,
+                  _deletionTime,
+                  _deletionSync,
+                  _descendantNode,
+                  _descendantSource,
+                  _descendantSync,
+                  _descendantMoveTime,
+                ]) => ({
+                  timestamp: Date.now(), // Current timestamp for restore operation
+                  node_id: deletedNode as string,
+                  old_parent_id: "TOMBSTONE",
+                  new_parent_id: originalParent as string,
+                  source: "reconcile",
+                  synced_at: undefined,
+                })
+              )
+
+              if (restoreMoves.length > 0) {
+                console.log("Restoring nodes:", restoreMoves)
+
+                // Insert restore operations
+                const restoreValues = restoreMoves
+                  .map(
+                    (move) => `(
+                      ${move.timestamp},
+                      '${move.node_id}',
+                      '${move.old_parent_id}',
+                      '${move.new_parent_id}',
+                      'reconcile',
+                      ${move.synced_at || "NULL"}
+                    )`
+                  )
+                  .join(",\n    ")
+
+                await execStatement(sql`
+                  -- Insert the restore operations
+                  INSERT INTO ${options.tables.opLog}
+                    (timestamp, node_id, old_parent_id, new_parent_id, source, synced_at)
+                  VALUES ${restoreValues};
+
+                  -- Update temp_nodes to reflect the restorations
+                  UPDATE temp_nodes
+                  SET parent_id = (
+                    SELECT new_parent_id
+                    FROM ${options.tables.opLog}
+                    WHERE node_id = temp_nodes.id
+                    ORDER BY timestamp DESC
+                    LIMIT 1
+                  )
+                  WHERE id IN (${restoreMoves
+                    .map((m) => `'${m.node_id}'`)
+                    .join(", ")});
+                `)
+              }
+            }
+
             // Copy final state back to nodes table
             await execStatement(sql`
               UPDATE ${options.tables.nodes}
@@ -277,6 +410,7 @@ async function setup() {
             messagePort.postMessage({
               id: action.id,
               elapsed: Math.trunc(end - start) / 1000,
+              restoreMoves,
             })
           } catch (error) {
             await execStatement(sql`
@@ -296,7 +430,7 @@ async function setup() {
         }
       }
     } catch (error) {
-      console.error(error)
+      console.error(error, event)
       messagePort.postMessage({
         error: error instanceof Error ? error.message : String(error),
       })

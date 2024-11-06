@@ -93,9 +93,12 @@ export const useSql = (options?: statements.DatabaseOptions) => {
       /**
        * Inserts a list of moves into the database.
        */
-      insertMoves: async (moves: Move[]) => {
+      insertMoves: async (moves: Move[], reconcile: boolean = false) => {
+        if (!moves.length) return { elapsed: 0, restoreMoves: [] }
+
         const result = await worker.insertMoves(
           moves,
+          reconcile,
           options ?? statements.defaultDatabaseOptions
         )
         Notifier.notify(options)
@@ -104,6 +107,7 @@ export const useSql = (options?: statements.DatabaseOptions) => {
 
         return {
           elapsed: result.elapsed,
+          restoreMoves: result.restoreMoves,
         }
       },
       /**
@@ -113,6 +117,8 @@ export const useSql = (options?: statements.DatabaseOptions) => {
         moves: { node_id: string; timestamp: number }[],
         syncedAt: number
       ) => {
+        if (!moves.length) return { elapsed: 0 }
+
         const result = await worker.exec(
           statements.markMovesSynced(moves, syncedAt, options)
         )

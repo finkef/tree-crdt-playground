@@ -1,6 +1,6 @@
 import { Move } from "@/lib/sql/types"
 import { cn } from "@/lib/utils"
-import { ArrowRight, CircleAlert, Plus, Trash2 } from "lucide-react"
+import { ArrowRight, CircleAlert, Plus, RotateCcw, Trash2 } from "lucide-react"
 
 export function OpLog({
   moves,
@@ -28,7 +28,9 @@ export function OpLog({
               move.source === "left" &&
                 "bg-blue-50/50 bg-[repeating-linear-gradient(45deg,transparent,transparent_4px,rgba(59,130,246,0.05)_2px,rgba(59,130,246,0.05)_8px)]",
               move.source === "right" &&
-                "bg-red-50/50 bg-[repeating-linear-gradient(45deg,transparent,transparent_4px,rgba(239,68,68,0.05)_2px,rgba(239,68,68,0.05)_8px)]"
+                "bg-red-50/50 bg-[repeating-linear-gradient(45deg,transparent,transparent_4px,rgba(239,68,68,0.05)_2px,rgba(239,68,68,0.05)_8px)]",
+              move.source === "reconcile" &&
+                "bg-yellow-50/50 bg-[repeating-linear-gradient(45deg,transparent,transparent_4px,rgba(253,224,71,0.05)_2px,rgba(253,224,71,0.05)_8px)]"
             )}
             key={`${move.node_id}-${move.timestamp}`}
           >
@@ -44,6 +46,11 @@ export function OpLog({
             {move.creates_cycle ? (
               <div className="ml-2 text-red-500 flex items-center gap-1">
                 <CircleAlert className="w-4 h-4" /> Skipped due to cycle
+              </div>
+            ) : null}
+            {move.source === "reconcile" ? (
+              <div className="ml-2 text-yellow-500 flex items-center gap-1">
+                <RotateCcw className="w-4 h-4" /> Restored
               </div>
             ) : null}
             <div className="flex-1" />
